@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+# Copyright (c) 2011, Sascha Peilicke <saschpe@gmx.de>
+#
 # This scripts exports track playcount, rating and score data from the Amarok
 # database and imports it into Clementine's database.
 #
