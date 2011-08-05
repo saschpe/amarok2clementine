@@ -8,6 +8,7 @@
 
 CURRENT_DIR=$PWD
 AMAROK_DIR=$HOME/.kde4/share/apps/amarok
+AMAROK_VERSION_MAJOR=2     # Options: 1 or 2
 AMAROK_DUMP_FILE=/tmp/amarok-artist_track_album_rating_score_playcount.csv
 CLEMENTINE_DIR=$HOME/.config/Clementine
 CLEMENTINE_DB_FILE=$CLEMENTINE_DIR/clementine.db
@@ -15,12 +16,24 @@ CLEMENTINE_DB_BACKUP_FILE=/tmp/clementine.db.backup
 MYSQL_PID_FILE=/tmp/amarok-dump.pid
 OLD_IFS="$IFS"
 
-trap 'kill $(jobs -p)' EXIT
+trap clean_exit EXIT
+
+clean_exit() {
+    echo "exiting..."
+    # Let's sleep for a while so all threads may have time to exit cleanly
+    sleep 1
+    kill_pids=$(jobs -p)
+    if [ -n "$kill_pids" ]; then
+        kill $kill_pids
+    fi
+}
+
 # Export Amarok statistics data. The file $AMAROK_DUMP_FILE contains the
 # following CSV (tab seperated, no header line) content:
 #
 #   Artist Track Album Rating Score Playcount
 #
+if [ $AMAROK_VERSION_MAJOR -eq 2 ]; then
 mysqld --defaults-file=$AMAROK_DIR/my.cnf \
        --default-storage-engine=MyISAM \
        --datadir=$AMAROK_DIR/mysqle \
@@ -37,7 +50,23 @@ mysql --socket=$AMAROK_DIR/sock amarok 2>&1 <<EOF
                 LEFT OUTER JOIN artists ON tracks.artist = artists.id;
 EOF
 kill `cat $MYSQL_PID_FILE`
-rm $MYSQL_PID_FILE
+rm -f $MYSQL_PID_FILE
+
+elif [ $AMAROK_VERSION_MAJOR -eq 1 ]; then
+    sqlite3 -separator "	" -nullvalue "\\N" $AMAROK_DIR/collection.db \
+        "SELECT artist.name, tags.title, album.name,
+                statistics.rating, statistics.percentage, statistics.playcounter
+         FROM tags LEFT OUTER JOIN statistics ON tags.url = statistics.url
+                   LEFT OUTER JOIN album ON tags.album = album.id
+                   LEFT OUTER JOIN artist ON tags.artist = artist.id
+         WHERE statistics.rating IS NOT NULL
+                OR statistics.percentage IS NOT NULL
+                OR statistics.playcounter IS NOT NULL
+         ORDER BY artist.name, album.name;" > $AMAROK_DUMP_FILE
+else
+    echo 'ERROR: invalid Amarok version'
+    exit 2
+fi
 
 # Make temporary Clementine database backup, in case we messed it up
 #echo "Creating Clementine backup database file: $CLEMENTINE_DB_BACKUP_FILE"
